@@ -273,4 +273,3 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log("Aviator cloud server on port", PORT);
   console.log("ID:", PLAYER_ID, "| ingest key:", INGEST_KEY);
 });
-
