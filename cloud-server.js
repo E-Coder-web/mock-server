@@ -63,7 +63,7 @@ function buildPayload(snapshot) {
     timeLeftMs: snapshot?.timeLeftMs ?? -1,
     hunting: Boolean(snapshot?.hunting),
     connected: true,
-    source: "cloud-server",
+    source: "777aviator",
     version: snapshot?.version ?? 0,
   };
 }
@@ -73,44 +73,31 @@ function buildNotification(payload) {
   return `NOTIFICATION:header_row_2;${b64}`;
 }
 
-function pushToAllSessions(snapshot) {
-  const payload = buildPayload(snapshot);
-  const multStr = payload.multiplier.toFixed(2);
-  const notification = buildNotification(payload);
-
-  for (const session of sessions.values()) {
-    session.packets.push(
-      `42["status",{"connected":true,"player_id":"${PLAYER_ID}","source":"cloud","roundId":${payload.roundId}}]`
-    );
-    session.packets.push(
-      `42["signal",${JSON.stringify({
-        multiplier: payload.multiplier,
-        mode: "2x",
-        value: payload.display,
-        roundId: payload.roundId,
-      })}]`
-    );
-    session.packets.push(
-      `42["odds",${JSON.stringify({
-        multiplier: multStr,
-        x: multStr,
-        coef: multStr,
-        value: payload.display,
-        roundId: payload.roundId,
-      })}]`
-    );
-    session.packets.push(`42["message",${JSON.stringify(notification)}]`);
-  }
-}
-
-function pushActiveSessionPackets(session, snapshot) {
+function pushSessionPackets(session, snapshot) {
   const payload = snapshot
     ? buildPayload(snapshot)
-    : { multiplier: 2.0, display: "2.00x", roundId: 0 };
-  const multStr = payload.multiplier.toFixed(2);
+    : {
+        multiplier: 1.0,
+        coef: 1.0,
+        coefficient: 1.0,
+        crashPoint: 1.0,
+        value: "1.00x",
+        display: "1.00x",
+        history: [],
+        historyNew: "",
+        roundId: 0,
+        liveRoundId: 0,
+        timeLeftMs: -1,
+        hunting: false,
+        connected: true,
+        source: "777aviator",
+        version: 0,
+      };
+  const multStr = Number(payload.multiplier).toFixed(2);
   const notification = buildNotification(payload);
+  const noteJson = JSON.stringify(notification);
   session.packets.push(
-    `42["status",{"connected":true,"player_id":"${PLAYER_ID}","source":"cloud","roundId":${payload.roundId}}]`
+    `42["status",{"connected":true,"player_id":"${PLAYER_ID}","source":"777aviator","roundId":${payload.roundId}}]`
   );
   session.packets.push(
     `42["signal",${JSON.stringify({
@@ -129,7 +116,18 @@ function pushActiveSessionPackets(session, snapshot) {
       roundId: payload.roundId,
     })}]`
   );
-  session.packets.push(`42["message",${JSON.stringify(notification)}]`);
+  session.packets.push(`42["message",${noteJson}]`);
+  session.packets.push(`42["notification",${noteJson}]`);
+}
+
+function pushToAllSessions(snapshot) {
+  for (const session of sessions.values()) {
+    pushSessionPackets(session, snapshot);
+  }
+}
+
+function pushActiveSessionPackets(session, snapshot) {
+  pushSessionPackets(session, snapshot);
 }
 
 function readBody(req) {
