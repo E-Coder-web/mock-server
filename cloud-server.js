@@ -231,14 +231,15 @@ const server = http.createServer(async (req, res) => {
     );
   }
 
-  if (path === "/socket.io" || path.startsWith("/socket.io")) {
+  if (path.includes("/socket.io") || path.endsWith("socket.io")) {
     const transport = url.searchParams.get("transport");
     const sidParam = url.searchParams.get("sid");
 
     if (transport === "polling" && req.method === "GET" && !sidParam) {
       const id = sid();
       sessions.set(id, { packets: [] });
-      const open = `0{"sid":"${id}","upgrades":["websocket"],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}`;
+      const open = `0{"sid":"${id}","upgrades":[],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}`;
+      console.log("[socket] open", id, req.headers["user-agent"] || "");
       res.writeHead(200, { "Content-Type": "text/plain; charset=UTF-8" });
       return res.end(open);
     }
@@ -256,6 +257,7 @@ const server = http.createServer(async (req, res) => {
       if (body.includes("40")) {
         session.packets.push(`40{"sid":"${sidParam}"}`);
         pushActiveSessionPackets(session, lastSnapshot);
+        console.log("[socket] connect", sidParam);
       }
       sessions.set(sidParam, session);
       res.writeHead(200, { "Content-Type": "text/plain; charset=UTF-8" });
@@ -271,3 +273,4 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log("Aviator cloud server on port", PORT);
   console.log("ID:", PLAYER_ID, "| ingest key:", INGEST_KEY);
 });
+
