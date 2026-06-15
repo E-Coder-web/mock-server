@@ -1,0 +1,12 @@
+{
+  "name": "aviator-gg-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node cloud-server.js",
+    "local": "node minimal-socket.js",
+    "bridge": "node aviator-bridge.js",
+    "777bridge": "node 777aviator-bridge.js",
+    "to-cloud": "node bridge-to-cloud.js"
+  }
+}

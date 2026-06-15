@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: gg
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node cloud-server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PLAYER_ID
+        value: "759304290"
+      - key: ID_LIST
+        value: "759304290"
+      - key: INGEST_KEY
+        value: "engineer5252"
