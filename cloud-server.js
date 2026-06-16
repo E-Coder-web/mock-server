@@ -73,6 +73,22 @@ function buildPayload(snapshot) {
   };
 }
 
+const REGISTER_URL =
+  process.env.REGISTER_URL || "https://wasafibet.co.tz/casino/list?register";
+
+function versionInfoBody() {
+  return JSON.stringify({
+    status: "ok",
+    success: true,
+    key: "engineer5252",
+    active: true,
+    player_id: PLAYER_ID,
+    register_url: REGISTER_URL,
+    connected: true,
+    source: "777aviator",
+  });
+}
+
 function buildNotification(payload) {
   const b64 = Buffer.from(JSON.stringify(payload)).toString("base64");
   return `NOTIFICATION:header_row_2;${b64}`;
@@ -173,6 +189,8 @@ const server = http.createServer(async (req, res) => {
         success: true,
         token: PLAYER_ID,
         player_id: PLAYER_ID,
+        register_url: REGISTER_URL,
+        active: true,
       })
     );
   }
@@ -182,14 +200,7 @@ const server = http.createServer(async (req, res) => {
     path.includes("/api/version_info/global/engineer5252")
   ) {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(
-      JSON.stringify({
-        status: "ok",
-        key: "engineer5252",
-        active: true,
-        player_id: PLAYER_ID,
-      })
-    );
+    return res.end(versionInfoBody());
   }
 
   if (path.includes("generate_204")) {
