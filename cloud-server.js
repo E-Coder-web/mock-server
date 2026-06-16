@@ -22,7 +22,12 @@ function sid() {
 }
 
 function parseUrl(req) {
-  return new URL(req.url, "http://localhost");
+  const raw = req.url || "/";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    return new URL(raw);
+  }
+  const pathOnly = raw.startsWith("/") ? raw : "/" + raw;
+  return new URL("http://internal" + pathOnly);
 }
 
 function parseMultiplier(raw) {
@@ -140,7 +145,11 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
   const url = parseUrl(req);
-  const path = url.pathname.replace(/\/+$/, "") || "/";
+  const path = url.pathname.replace(/\/+/g, "/").replace(/\/+$/, "") || "/";
+
+  if (!path.includes("socket.io")) {
+    console.log(req.method, path);
+  }
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -168,12 +177,10 @@ const server = http.createServer(async (req, res) => {
     );
   }
 
-  if (path.includes("generate_204")) {
-    res.writeHead(204);
-    return res.end();
-  }
-
-  if (path.includes("/api/version_info/global/engineer5252")) {
+  if (
+    path.includes("/api/version_info/global/additional_row_for_first_line") ||
+    path.includes("/api/version_info/global/engineer5252")
+  ) {
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(
       JSON.stringify({
@@ -183,6 +190,11 @@ const server = http.createServer(async (req, res) => {
         player_id: PLAYER_ID,
       })
     );
+  }
+
+  if (path.includes("generate_204")) {
+    res.writeHead(204);
+    return res.end();
   }
 
   if (path === "/health") {
