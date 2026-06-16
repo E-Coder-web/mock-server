@@ -12,10 +12,15 @@ const PORT = Number(process.env.PORT || 3000);
 const ID_LIST = process.env.ID_LIST || "759304290";
 const PLAYER_ID = process.env.PLAYER_ID || "759304290";
 const INGEST_KEY = process.env.INGEST_KEY || "engineer5252";
+const SERVER_STARTED_AT = new Date().toISOString();
 
 const sessions = new Map();
 let lastVersion = -1;
 let lastSnapshot = null;
+
+function nowIso() {
+  return new Date().toISOString();
+}
 
 function sid() {
   return crypto.randomBytes(8).toString("hex");
@@ -164,7 +169,7 @@ const server = http.createServer(async (req, res) => {
   const path = url.pathname.replace(/\/+/g, "/").replace(/\/+$/, "") || "/";
 
   if (!path.includes("socket.io")) {
-    console.log(req.method, path);
+    console.log(nowIso(), req.method, path);
   }
 
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -214,6 +219,8 @@ const server = http.createServer(async (req, res) => {
       JSON.stringify({
         ok: true,
         cloud: true,
+        server_time_utc: nowIso(),
+        server_started_at_utc: SERVER_STARTED_AT,
         connected: Boolean(lastSnapshot),
         version: lastVersion,
         sessions: sessions.size,
