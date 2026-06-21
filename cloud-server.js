@@ -8,6 +8,185 @@
 const http = require("http");
 const crypto = require("crypto");
 
+// --- Socket.IO / Engine.IO v3 helpers (phone app requires EIO=3) ---
+function isSocketPath(path) {
+  return path.includes("/socket.io") || path.endsWith("socket.io");
+}
+
+function getSocketTransportOpts(url) {
+  const eio = url.searchParams.get("EIO") === "4" ? 4 : 3;
+  const b64 = url.searchParams.get("b64") === "1";
+  return { eio, b64 };
+}
+
+function decodePollingBody(body, opts) {
+  let raw = body || "";
+  if (!raw || opts.eio !== 3) return raw;
+  let out = "";
+  let idx = 0;
+  while (idx < raw.length) {
+    const colon = raw.indexOf(":", idx);
+    if (colon < 0) break;
+    const len = Number.parseInt(raw.slice(idx, colon), 10);
+    if (!Number.isFinite(len)) break;
+    const msg = raw.slice(colon + 1, colon + 1 + len);
+    if (msg.length !== len) break;
+    out += msg;
+    idx = colon + 1 + len;
+  }
+  return out || raw;
+}
+
+function encodePollingBody(packets, opts) {
+  if (!packets.length) return opts.eio === 3 ? "0:" : "6";
+  if (opts.eio === 3) {
+    return packets.map((packet) => `${packet.length}:${packet}`).join("");
+  }
+  return packets.join("");
+}
+
+function buildOpenPacket(sessionId, upgrades = []) {
+  const upgradeList = upgrades.length ? `"${upgrades.join('","')}"` : "";
+  const json = `{"sid":"${sessionId}","upgrades":[${upgradeList}],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}`;
+  return `0${json}`;
+}
+
+function buildDefaultPayload(snapshot, source = "777aviator") {
+  if (snapshot) {
+    const mult =
+      typeof snapshot.multiplier === "number" && snapshot.multiplier > 0
+        ? snapshot.multiplier
+        : 1.0;
+    const multStr = mult.toFixed(2);
+    const display = snapshot.display || snapshot.value || `${multStr}x`;
+    const roundId = snapshot.roundId ?? snapshot.liveRoundId ?? 0;
+    return {
+      multiplier: mult,
+      coef: mult,
+      coefficient: mult,
+      crashPoint: mult,
+      value: display,
+      display,
+      history: snapshot.history || [],
+      historyNew: snapshot.historyNew || snapshot.value || "",
+      roundId,
+      liveRoundId: snapshot.liveRoundId ?? roundId,
+      timeLeftMs: snapshot.timeLeftMs ?? -1,
+      hunting: Boolean(snapshot.hunting),
+      connected: true,
+      source,
+      version: snapshot.version ?? 0,
+    };
+  }
+  return {
+    multiplier: 1.0,
+    coef: 1.0,
+    coefficient: 1.0,
+    crashPoint: 1.0,
+    value: "1.00x",
+    display: "1.00x",
+    history: ["2.00x", "1.50x", "1.20x"],
+    historyNew: "1.00x",
+    roundId: 1,
+    liveRoundId: 1,
+    timeLeftMs: -1,
+    hunting: false,
+    connected: true,
+    source,
+    version: 1,
+  };
+}
+
+function buildRelayNotification(payload, row = "header_row_2") {
+  const b64 = Buffer.from(JSON.stringify(payload)).toString("base64");
+  return `NOTIFICATION:${row};${b64}`;
+}
+
+function enqueueSessionPackets(session, snapshot, playerId, source) {
+  const payload = buildDefaultPayload(snapshot, source);
+  const multStr = Number(payload.multiplier).toFixed(2);
+  const notification = buildRelayNotification(payload);
+  const noteJson = JSON.stringify(notification);
+  session.packets.push(
+    `42["status",{"connected":true,"player_id":"${playerId}","source":"${source}","roundId":${payload.roundId}}]`
+  );
+  session.packets.push(
+    `42["signal",${JSON.stringify({
+      multiplier: payload.multiplier,
+      mode: "2x",
+      value: payload.display,
+      roundId: payload.roundId,
+    })}]`
+  );
+  session.packets.push(
+    `42["odds",${JSON.stringify({
+      multiplier: multStr,
+      x: multStr,
+      coef: multStr,
+      value: payload.display,
+      roundId: payload.roundId,
+    })}]`
+  );
+  session.packets.push(`42["message",${noteJson}]`);
+  session.packets.push(`42["notification",${noteJson}]`);
+}
+
+function handleSocketPolling(req, res, url, sessions, hooks) {
+  const transport = url.searchParams.get("transport");
+  const sidParam = url.searchParams.get("sid");
+  const opts = getSocketTransportOpts(url);
+  const socketHeaders = { "Content-Type": "text/plain; charset=UTF-8" };
+
+  if (transport !== "polling") {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    return res.end("not found");
+  }
+
+  if (req.method === "GET" && !sidParam) {
+    const id = hooks.newSessionId();
+    sessions.set(id, { packets: [] });
+    const open = buildOpenPacket(id, hooks.upgrades || []);
+    if (hooks.onOpen) hooks.onOpen(id, req);
+    res.writeHead(200, socketHeaders);
+    return res.end(encodePollingBody([open], opts));
+  }
+
+  if (req.method === "GET" && sidParam) {
+    const session = sessions.get(sidParam) || { packets: [] };
+    if (!session.activated) {
+      session.activated = true;
+      session.packets.push(`40{"sid":"${sidParam}"}`);
+      hooks.onNamespaceConnect(session, sidParam);
+      sessions.set(sidParam, session);
+    }
+    const out = encodePollingBody(session.packets.splice(0), opts);
+    res.writeHead(200, socketHeaders);
+    return res.end(out);
+  }
+
+  if (req.method === "POST" && sidParam) {
+    return hooks.readBody(req).then((body) => {
+      const session = sessions.get(sidParam) || { packets: [] };
+      const decoded = decodePollingBody(body, opts);
+      if (decoded === "2" || decoded.startsWith("2probe")) {
+        res.writeHead(200, socketHeaders);
+        return res.end(encodePollingBody(["3"], opts));
+      }
+      if (decoded.includes("40") && !session.activated) {
+        session.activated = true;
+        session.packets.push(`40{"sid":"${sidParam}"}`);
+        hooks.onNamespaceConnect(session, sidParam);
+      }
+      sessions.set(sidParam, session);
+      res.writeHead(200, socketHeaders);
+      return res.end(encodePollingBody([], opts));
+    });
+  }
+
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  return res.end("not found");
+}
+
 const PORT = Number(process.env.PORT || 3000);
 const ID_LIST = process.env.ID_LIST || "759304290";
 const PLAYER_ID = process.env.PLAYER_ID || "759304290";
@@ -78,6 +257,10 @@ function buildPayload(snapshot) {
   };
 }
 
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64"
+);
 const REGISTER_URL =
   process.env.REGISTER_URL || "https://wasafibet.co.tz/casino/list?register";
 
@@ -109,15 +292,15 @@ function pushSessionPackets(session, snapshot) {
         crashPoint: 1.0,
         value: "1.00x",
         display: "1.00x",
-        history: [],
-        historyNew: "",
-        roundId: 0,
-        liveRoundId: 0,
+        history: ["2.00x", "1.50x", "1.20x"],
+        historyNew: "1.00x",
+        roundId: 1,
+        liveRoundId: 1,
         timeLeftMs: -1,
         hunting: false,
         connected: true,
         source: "777aviator",
-        version: 0,
+        version: 1,
       };
   const multStr = Number(payload.multiplier).toFixed(2);
   const notification = buildNotification(payload);
@@ -153,7 +336,11 @@ function pushToAllSessions(snapshot) {
 }
 
 function pushActiveSessionPackets(session, snapshot) {
-  pushSessionPackets(session, snapshot);
+  if (snapshot) {
+    pushSessionPackets(session, snapshot);
+    return;
+  }
+  enqueueSessionPackets(session, null, PLAYER_ID, "777aviator");
 }
 
 function readBody(req) {
@@ -261,38 +448,24 @@ const server = http.createServer(async (req, res) => {
     );
   }
 
-  if (path.includes("/socket.io") || path.endsWith("socket.io")) {
-    const transport = url.searchParams.get("transport");
-    const sidParam = url.searchParams.get("sid");
+  if (path.includes("/media/img/") && path.endsWith(".jpg")) {
+    res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" });
+    return res.end(TINY_PNG);
+  }
 
-    if (transport === "polling" && req.method === "GET" && !sidParam) {
-      const id = sid();
-      sessions.set(id, { packets: [] });
-      const open = `0{"sid":"${id}","upgrades":[],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}`;
-      console.log("[socket] open", id, req.headers["user-agent"] || "");
-      res.writeHead(200, { "Content-Type": "text/plain; charset=UTF-8" });
-      return res.end(open);
-    }
-
-    if (transport === "polling" && req.method === "GET" && sidParam) {
-      const session = sessions.get(sidParam) || { packets: [] };
-      const out = session.packets.splice(0).join("") || "2:40";
-      res.writeHead(200, { "Content-Type": "text/plain; charset=UTF-8" });
-      return res.end(out);
-    }
-
-    if (transport === "polling" && req.method === "POST" && sidParam) {
-      const session = sessions.get(sidParam) || { packets: [] };
-      const body = await readBody(req);
-      if (body.includes("40")) {
-        session.packets.push(`40{"sid":"${sidParam}"}`);
+  if (isSocketPath(path)) {
+    return handleSocketPolling(req, res, url, sessions, {
+      newSessionId: sid,
+      upgrades: [],
+      readBody,
+      onOpen(id, req) {
+        console.log("[socket] open", id, req.headers["user-agent"] || "");
+      },
+      onNamespaceConnect(session) {
         pushActiveSessionPackets(session, lastSnapshot);
-        console.log("[socket] connect", sidParam);
-      }
-      sessions.set(sidParam, session);
-      res.writeHead(200, { "Content-Type": "text/plain; charset=UTF-8" });
-      return res.end("ok");
-    }
+        console.log("[socket] connect packets queued");
+      },
+    });
   }
 
   res.writeHead(404, { "Content-Type": "text/plain" });
